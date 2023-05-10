@@ -1,0 +1,591 @@
+import Foundation
+
+struct AZHealthExpenditureRequestDocFieldModel {
+    let title: String
+    let documents: [AZDocumentCardViewItemModel]
+}
+
+import Foundation
+
+final class AZHealthExpenditureRequestAddDocCoordinator: AZCoordinator {
+
+    var childCoordinators = [AZCoordinator]()
+    var navigationController: UINavigationController
+    var rootViewController: UIViewController?
+
+    init(navigationController: UINavigationController) {
+        self.navigationController = navigationController
+    }
+
+    func start(
+        previewModel: AZHealthExpenditureRequestPreviewModel,
+		isFromPreview: Bool = false
+    ) {
+        let repository = AZHealthExpenditureRequestAddDocRepository()
+        let viewModel = AZHealthExpenditureRequestAddDocVM(
+            repository: repository,
+			expenditureType: previewModel.expenditureType?.intValue ?? 0,
+            previewModel: previewModel)
+        let vc = AZHealthExpenditureRequestAddDocVC.instanceFromNib()
+        vc.viewModel = viewModel
+        vc.coordinator = self
+		vc.isFromPreview = isFromPreview
+        rootViewController = vc
+        navigationController.pushViewController(vc, animated: true)
+    }
+
+    func presentInfoBottomSheet(title: String, message: String?) {
+        guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+        let model = AZBottomSheetUIModel(
+            icon: .info,
+            title: title,
+            description: message,
+            buttonModels: [
+                .init(title: "Common.close".localized.uppercasedLocal, type: .primary)
+            ])
+        rootVC.presentBottomSheet(model: model)
+    }
+
+    func presentUploadBottomSheet(
+        galleryButtonAction: @escaping (() -> Void),
+        photoButtonAction: @escaping (() -> Void),
+        pdfButtonAction: @escaping (() -> Void)
+    ) {
+        guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+        let vc = AZSelectableBottomSheetVC.instanceFromNib()
+        vc.model = .init(
+            items: [
+                .init(title: "Common.chooseFromGallery".localized, action: galleryButtonAction),
+                .init(title: "Common.takePhoto".localized, action: photoButtonAction),
+                .init(title: "Common.uploadPdf".localized, action: pdfButtonAction)
+            ],
+            buttonTitle: "Common.continue".localized.uppercasedLocal)
+        vc.modalPresentationStyle = .overFullScreen
+        rootVC.present(vc, animated: false)
+    }
+
+    func presentDocumentPicker() {
+        guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+        let documentPicker = UIDocumentPickerViewController(documentTypes: [String(kUTTypePDF)], in: .import)
+        documentPicker.delegate = rootVC
+        rootVC.present(documentPicker, animated: true)
+    }
+
+    func presentFileErrorSizeBottomSheet(size: Int, tryButtonAction: @escaping (() -> Void)) {
+        guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+        let model = AZBottomSheetUIModel(
+            icon: .error,
+            title: "HealthExpenditureRequestAddDoc.addDocFail".localized,
+            description: String(format: "HealthExpenditureRequestAddDoc.addDocFail.descOne".localized, size),
+            buttonModels: [
+                .init(title: "Common.tryAgain".localized.uppercasedLocal, type: .primary, action: tryButtonAction)
+            ])
+        rootVC.presentBottomSheet(model: model)
+    }
+
+    func presentRemoveDocumentBottomSheet(removeButtonAction: @escaping (() -> Void)) {
+        guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+        let model = AZBottomSheetUIModel(
+            icon: .info,
+            title: "Common.areYouSure".localized,
+            description: "HealthExpenditureRequestAddDoc.removeDocDesc".localized,
+            buttonModels: [
+                .init(title: "HealthExpenditureRequestAddDoc.removeDoc".localized.uppercasedLocal, type: .primary, action: removeButtonAction),
+                .init(title: "Common.abort".localized, type: .text)
+            ])
+        rootVC.presentBottomSheet(model: model)
+    }
+
+    func presentServiceErrorBottomSheet() {
+        guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+        let model = AZBottomSheetUIModel(
+            icon: .error,
+            title: "Common.error".localized,
+            description: "Common.serviceError".localized,
+            buttonModels: [
+                .init(title: "Common.done".localized.uppercasedLocal, type: .primary)
+            ])
+        rootVC.presentBottomSheet(model: model)
+    }
+
+	func presentPreviewBottomSheet() {
+		guard let rootVC = rootViewController as? AZHealthExpenditureRequestAddDocVC else { return }
+		let model = AZBottomSheetUIModel(
+			icon: .info,
+			title: "Common.warning".localized,
+			description: "SpendingDemandDetail.saveChanges".localized,
+			buttonModels: [
+				.init(
+					title: "Common.ok".localized.uppercasedLocal,
+					type: .primary,
+					autoDismissEnabled: true
+				)
+			])
+		rootVC.presentBottomSheet(model: model)
+   }
+
+    func goToPhotoPreview(image: UIImage, navBarTitle: String?, saveButtonEnabled: Bool) {
+        let vc = AZPhotoPreviewViewController.instantiate(
+            navigator: AZAppNavigator.shared,
+            image: image,
+            navBarTitle: navBarTitle,
+            saveButtonEnabled: saveButtonEnabled)
+        navigationController.pushViewController(vc, animated: true)
+    }
+
+    func goToPDF(pdfData: Data, navBarTitle: String) {
+        AZAppNavigator.shared.navigateToPDFViewController(
+            parentNC: navigationController,
+            data: pdfData,
+            policyNo: navBarTitle)
+    }
+
+    func goToHealthExpenditureRequestPreview(previewModel: AZHealthExpenditureRequestPreviewModel) {
+        let coordinator = AZHealthExpenditureRequestPreviewCoordinator(navigationController: navigationController)
+        AppDelegate.shared.appCoordinator.childCoordinators.append(coordinator)
+        coordinator.start(previewModel: previewModel)
+    }
+}
+
+import Foundation
+
+protocol AZHealthExpenditureRequestAddDocRepositoryProtocol {
+    func fetchAddDocumentFields(
+        expenditureType: Int,
+        completion: @escaping((Result<AZHealthExpenditureRequestAddDocFieldsResponse, AZError>) -> Void))
+}
+
+final class AZHealthExpenditureRequestAddDocRepository: AZBaseModel, AZHealthExpenditureRequestAddDocRepositoryProtocol {
+
+    private let serviceAdapter = OneAppServiceAdapterProvider.instance.healthExpenditureRequestServiceAdapter
+
+    func fetchAddDocumentFields(
+        expenditureType: Int,
+        completion: @escaping ((Result<AZHealthExpenditureRequestAddDocFieldsResponse, AZError>) -> Void)
+    ) {
+        serviceAdapter?.fetchAddDocumentFields(expenditureType: expenditureType, completion: completion).disposed(by: disposeBag)
+    }
+}
+
+
+
+import UIKit
+
+final class AZHealthExpenditureRequestAddDocVC: AZBaseVC {
+
+    // MARK: - IBOutlets
+
+	@IBOutlet private weak var contentView: UIView!
+	@IBOutlet private weak var scrollView: UIScrollView!
+	@IBOutlet private weak var stepperView: AZStepperView!
+    @IBOutlet private weak var containerView: UIView!
+    @IBOutlet private weak var titleLabel: AZCustomLabel!
+    @IBOutlet private weak var descriptionLabel: AZCustomLabel!
+    @IBOutlet private weak var infoTitleLabel: AZCustomLabel!
+    @IBOutlet private weak var infoCardView: AZInfoCardView!
+    @IBOutlet private weak var addDocumentStackView: UIStackView!
+    @IBOutlet private weak var continueButton: AZCustomButton!
+
+    // MARK: - Properties
+
+    private var mediaManager: AZMediaManager?
+    private var selectedAddDocumentView: AZAddDocumentView?
+
+    weak var coordinator: AZHealthExpenditureRequestAddDocCoordinator?
+    var viewModel: AZHealthExpenditureRequestAddDocVMProtocol! {
+        didSet {
+            viewModel.delegate = self
+        }
+    }
+	private var hasChanges: Bool = false
+	var isFromPreview: Bool = false
+	var isFilled: Bool = false
+	private var isFromPreviewBack: Bool = false
+
+    // MARK: - LifeCycle Methods
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+		if isFromPreview {
+			viewModel.loadSavedDocuments()
+			continueButton.setTitle("Common.save".localized.uppercasedLocal, for: .normal)
+		} else {
+			if viewModel.isFilled() {
+				isFilled = true
+				viewModel.loadSavedDocuments()
+			} else {
+				viewModel.fetchAddDocumentFields()
+			}
+		}
+    }
+
+	override func navigateBack(sender: UIBarButtonItem) {
+		if hasChanges {
+			coordinator?.presentPreviewBottomSheet()
+		} else {
+			if let spendingDemandDetailVC = navigationController?.viewControllers.dropLast().last as? AZHealthExpenditureSpendingDemandDetailVC {
+				spendingDemandDetailVC.fromAddDoc(previewModel: viewModel.previewModel)
+				navigationController?.popViewController(animated: true)
+				return
+			}
+			navigationController?.popViewController(animated: true)
+		}
+	}
+}
+
+// MARK: - Private Methods
+
+private extension AZHealthExpenditureRequestAddDocVC {
+
+    func setupUI() {
+        contentView.isHidden = true
+        setupTexts()
+        setupStepperView()
+		scrollView.addTopBounceAreaView(color: .color8)
+        containerView.roundCorner([.topLeft, .topRight], radius: 35)
+        infoCardView.type = .primaryDocument
+        mediaManager = AZMediaManager(parentVC: self)
+        mediaManager?.delegate = self
+        continueButton.disable()
+    }
+
+    func setupTexts() {
+        configureNavigationBarWithTitle(title: "HealthExpenditureRequest.entranceNavigationTitle".localized.uppercasedLocal)
+        infoTitleLabel.text = "HealthExpenditureRequestAddDoc.addDocument".localized
+        infoCardView.update(with: "HealthExpenditureRequestAddDoc.documentInfo".localized)
+        continueButton.setTitle("Common.continue".localized.uppercasedLocal, for: .normal)
+    }
+
+    func setupStepperView() {
+        stepperView.title = "HealthExpenditureRequestAddDoc.stepperTitle".localized
+        stepperView.steps = .init(repeating: AZStep(), count: 4)
+        stepperView.activeStepIndex = 2
+    }
+
+	func updateUI(
+		with response: AZHealthExpenditureRequestAddDocFieldsResponse,
+		docs: [AZHealthExpenditureRequestDocFieldModel] = []) {
+			addDocumentStackView.removeAllArrangedSubviews()
+			titleLabel.text = response.headerText
+			descriptionLabel.text = response.headerExplanationText
+			response.fields?.forEach({ field in
+				let addDocumentView = AZAddDocumentView()
+				addDocumentView.delegate = self
+                addDocumentView.title = field.titleText
+				addDocumentView.infoMessage = field.tooltip
+				addDocumentView.isMandatory = field.isMandatory ?? false
+				if isFromPreview || isFilled {
+					selectedAddDocumentView = addDocumentView
+					let files = docs.first(where: { $0.title == addDocumentView.title })
+					files?.documents.forEach { doc in
+						addDocument(data: doc.data, type: doc.type)
+					}
+					checkMandatoryFields()
+				}
+				addDocumentStackView.addArrangedSubview(addDocumentView)
+			})
+			contentView.isHidden = false
+			viewModel.updatePreviewModel(with: response)
+		}
+
+	func addDocumentsToModel() {
+		var docFields: [AZHealthExpenditureRequestDocFieldModel] = []
+		addDocumentStackView.arrangedSubviews.forEach { view in
+			guard let addDocumentView = view as? AZAddDocumentView else { return }
+			docFields.append(.init(title: addDocumentView.title, documents: addDocumentView.documents))
+		}
+		viewModel.updatePreviewModelForRequest(with: docFields)
+	}
+
+	func addDocument(data: Data, type: AZDocumentCardItemType) {
+        guard let selectedAddDocumentView = selectedAddDocumentView else { return }
+        let fileName = selectedAddDocumentView.title.replace(.star, replacement: "")
+        let document = AZDocumentCardViewItemModel(data: data, type: type, name: fileName)
+        selectedAddDocumentView.addDocument(document)
+    }
+
+    func checkMandatoryFields() {
+        var isFieldsOK: Bool = true
+        addDocumentStackView.arrangedSubviews.forEach { view in
+            guard let view = view as? AZAddDocumentView else { return }
+            if view.isMandatory && view.documents.count == 0 {
+                isFieldsOK = false
+                return
+            }
+        }
+        isFieldsOK ? continueButton.enable() : continueButton.disable()
+    }
+}
+
+// MARK: - Actions
+
+extension AZHealthExpenditureRequestAddDocVC {
+
+    @IBAction func didTapContinueButton(_ sender: Any) {
+		AZAnalyticsManager.shared.sendEvent(name: "SHT_BelgeEkleme_DevamEt")
+        viewModel.didTapContinueButton()
+    }
+}
+
+// MARK: - AZHealthExpenditureRequestAddDocVMDelegate
+
+extension AZHealthExpenditureRequestAddDocVC: AZHealthExpenditureRequestAddDocVMDelegate {
+
+    func handleVMOutput(_ output: AZHealthExpenditureRequestAddDocVMOutput) {
+        switch output {
+        case .setLoading(let isLoading):
+            handleProgressHud(shouldDisplayProgressHud: isLoading)
+        case .updateUI(let response):
+            updateUI(with: response)
+        case .goToHealthExpenditureRequestPreview(let previewModel):
+			if isFromPreview, !isFromPreviewBack {
+				if let preview = navigationController?.viewControllers.dropLast().last as? AZHealthExpenditureRequestPreviewVC {
+					preview.updatePreviewModel(previewModel: previewModel)
+					navigationController?.popViewController(animated: true)
+				}
+				return
+			}
+            coordinator?.goToHealthExpenditureRequestPreview(previewModel: previewModel)
+        case .showServiceError:
+            contentView.isHidden = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: { [weak self] in
+                self?.coordinator?.presentServiceErrorBottomSheet()
+			})
+		case .loadSavedDocuments(let model, let docs):
+			updateUI(with: model, docs: docs)
+		}
+    }
+}
+
+// MARK: - AZAddDocumentViewDelegate
+
+extension AZHealthExpenditureRequestAddDocVC: AZAddDocumentViewDelegate {
+
+    func didTapInfoButton(_ view: AZAddDocumentView) {
+        coordinator?.presentInfoBottomSheet(title: view.title.replace(.star, replacement: ""), message: view.infoMessage)
+    }
+
+    func didTapPlusView(_ view: AZAddDocumentView) {
+        selectedAddDocumentView = view
+        coordinator?.presentUploadBottomSheet(galleryButtonAction: { [weak self] in
+            self?.mediaManager?.openGallery()
+        }, photoButtonAction: { [weak self] in
+            self?.mediaManager?.openCamera()
+        }, pdfButtonAction: { [weak self] in
+            self?.coordinator?.presentDocumentPicker()
+        })
+    }
+
+    func addDocumentView(_ view: AZAddDocumentView, didTapDocumentAt index: Int) {
+        let document = view.documents[index]
+        switch document.type {
+        case .image:
+            guard let image = UIImage(data: document.data) else { return }
+            coordinator?.goToPhotoPreview(image: image, navBarTitle: document.name, saveButtonEnabled: true)
+        case .pdf:
+            coordinator?.goToPDF(pdfData: document.data, navBarTitle: document.name)
+        }
+    }
+
+    func addDocumentView(_ view: AZAddDocumentView, didTapRemoveDocumentAt index: Int) {
+        coordinator?.presentRemoveDocumentBottomSheet { [weak self] in
+            view.removeDocument(at: index)
+			guard let self = self else { return }
+            self.checkMandatoryFields()
+			self.hasChanges = self.isFromPreview ? true : false
+			if self.isFromPreview {
+				self.viewModel.didDocsEditted()
+			}
+			self.addDocumentsToModel()
+        }
+    }
+}
+
+// MARK: - AZMediaManagerDelegate
+
+extension AZHealthExpenditureRequestAddDocVC: AZMediaManagerDelegate {
+
+    func mediaManager(_ manager: AZMediaManager, didSelectImage image: UIImage) {
+        let cropVC = TOCropViewController(image: image)
+        cropVC.delegate = self
+        present(cropVC, animated: true)
+    }
+}
+
+// MARK: - TOCropViewControllerDelegate
+
+extension AZHealthExpenditureRequestAddDocVC: TOCropViewControllerDelegate {
+
+    func cropViewController(_ cropViewController: TOCropViewController, didCropTo image: UIImage, with cropRect: CGRect, angle: Int) {
+        cropViewController.dismiss(animated: true) { [weak self] in
+            guard let self = self else { return }
+			self.handleProgressHud(shouldDisplayProgressHud: true)
+            image.compress(to: 500) { data in
+                DispatchQueue.main.async {
+                    guard let data = data else { return }
+                    self.addDocument(data: data, type: .image)
+                    self.checkMandatoryFields()
+					self.handleProgressHud(shouldDisplayProgressHud: false)
+					self.hasChanges = self.isFromPreview ? true : false
+					if self.isFromPreview {
+						self.viewModel.didDocsEditted()
+					}
+					self.addDocumentsToModel()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - UIDocumentPickerDelegate
+
+extension AZHealthExpenditureRequestAddDocVC: UIDocumentPickerDelegate {
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        controller.dismiss(animated: true) { [weak self] in
+            guard let self = self,
+                  let URL = urls.first,
+                  let data = try? Data(contentsOf: URL) else { return }
+            let pdfSize = Int(data.getSizeIn(.kilobyte))
+            if pdfSize > self.viewModel.maxFileUploadSize {
+                self.coordinator?.presentFileErrorSizeBottomSheet(size: self.viewModel.maxFileUploadSize) { [weak self] in
+                    self?.coordinator?.presentDocumentPicker()
+                }
+                return
+            }
+            self.addDocument(data: data, type: .pdf)
+            self.checkMandatoryFields()
+			self.hasChanges = self.isFromPreview ? true : false
+			self.addDocumentsToModel()
+        }
+    }
+}
+
+// MARK: - PreviewVC Functions
+extension AZHealthExpenditureRequestAddDocVC {
+	func updatePreviewModel(previewModel: AZHealthExpenditureRequestPreviewModel) {
+		isFromPreview = true
+		isFromPreviewBack = true
+		viewModel.changePreviewModel(previewModel: previewModel)
+		viewModel.loadSavedDocuments()
+	}
+}
+
+import Foundation
+
+protocol AZHealthExpenditureRequestAddDocVMProtocol {
+    var delegate: AZHealthExpenditureRequestAddDocVMDelegate? { get set }
+    var maxFileUploadSize: Int { get set }
+	var previewModel: AZHealthExpenditureRequestPreviewModel { get }
+
+    func fetchAddDocumentFields()
+	func didDocsEditted()
+    func updatePreviewModelForRequest(with docFields: [AZHealthExpenditureRequestDocFieldModel])
+	func updatePreviewModel(with docRequest: AZHealthExpenditureRequestAddDocFieldsResponse)
+    func didTapContinueButton()
+	func changePreviewModel(previewModel: AZHealthExpenditureRequestPreviewModel)
+	func loadSavedDocuments()
+	func isFilled() -> Bool
+}
+
+enum AZHealthExpenditureRequestAddDocVMOutput {
+    case setLoading(Bool)
+    case updateUI(AZHealthExpenditureRequestAddDocFieldsResponse)
+    case goToHealthExpenditureRequestPreview(AZHealthExpenditureRequestPreviewModel)
+    case showServiceError
+	case loadSavedDocuments(AZHealthExpenditureRequestAddDocFieldsResponse, [AZHealthExpenditureRequestDocFieldModel])
+}
+
+protocol AZHealthExpenditureRequestAddDocVMDelegate: AnyObject {
+    func handleVMOutput(_ output: AZHealthExpenditureRequestAddDocVMOutput)
+}
+
+import Foundation
+
+final class AZHealthExpenditureRequestAddDocVM {
+
+    weak var delegate: AZHealthExpenditureRequestAddDocVMDelegate?
+    private let repository: AZHealthExpenditureRequestAddDocRepositoryProtocol
+    private let expenditureType: Int
+	var previewModel: AZHealthExpenditureRequestPreviewModel
+
+    var maxFileUploadSize: Int = 4096
+
+    init(
+        repository: AZHealthExpenditureRequestAddDocRepositoryProtocol,
+        expenditureType: Int,
+        previewModel: AZHealthExpenditureRequestPreviewModel
+	) {
+        self.repository = repository
+        self.expenditureType = expenditureType
+        self.previewModel = previewModel
+    }
+}
+
+// MARK: - AZHealthExpenditureRequestAddDocVMProtocol
+
+extension AZHealthExpenditureRequestAddDocVM: AZHealthExpenditureRequestAddDocVMProtocol {
+
+    func fetchAddDocumentFields() {
+        delegate?.handleVMOutput(.setLoading(true))
+        repository.fetchAddDocumentFields(expenditureType: expenditureType) { [weak self] result in
+            guard let self = self else { return }
+            self.delegate?.handleVMOutput(.setLoading(false))
+            switch result {
+            case .success(let response):
+                if let size = response.maxFileUploadSize {
+                    self.maxFileUploadSize = size
+                }
+                self.delegate?.handleVMOutput(.updateUI(response))
+            case .failure:
+                self.delegate?.handleVMOutput(.showServiceError)
+            }
+        }
+    }
+
+    func updatePreviewModelForRequest(with docFields: [AZHealthExpenditureRequestDocFieldModel]) {
+        previewModel.docFields = docFields
+		previewModel.uploadDocumentRequest.removeAll()
+        docFields.forEach { docField in
+            docField.documents.forEach { doc in
+                let request = AZHealthExpenditureRequestUploadDocumentRequest(
+                    document: doc.data.base64EncodedString(),
+                    documentName: doc.name,
+                    ext: doc.type.ext,
+                    partitionNo: previewModel.createRequest.partitionNo,
+                    policyNo: previewModel.createRequest.policyNo)
+                previewModel.uploadDocumentRequest.append(request)
+            }
+        }
+    }
+
+	func updatePreviewModel(with docResponse: AZHealthExpenditureRequestAddDocFieldsResponse) {
+		previewModel.docResponse = docResponse
+	}
+
+    func didTapContinueButton() {
+        delegate?.handleVMOutput(.goToHealthExpenditureRequestPreview(previewModel))
+    }
+	
+	func didDocsEditted() {
+		previewModel.isFromDocEdit = true
+	}
+
+	func changePreviewModel(previewModel: AZHealthExpenditureRequestPreviewModel) {
+		self.previewModel = previewModel
+	}
+
+	func loadSavedDocuments() {
+		guard let docResponse = previewModel.docResponse else { return }
+		delegate?.handleVMOutput(.loadSavedDocuments(docResponse, previewModel.docFields))
+	}
+	
+	func isFilled() -> Bool {
+		if previewModel.docFields.isEmpty {
+			return false
+		} else {
+			return true
+		}
+	}
+}
